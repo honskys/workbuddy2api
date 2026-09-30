@@ -1,24 +1,46 @@
+# WorkBuddy2API 网关 —— Docker Compose（已为本项目调好，勿手改）
+#
+# 与上游默认 compose 的区别：
+#   1) 加了共享网络 wb-net，让管理端用服务名 workbuddy2api 直连，无需发布到公网
+#   2) ports 的绑定地址由安装脚本注入（127.0.0.1），默认只绑 127.0.0.1 或 Tailscale 网卡
+#   3) 显式 image 名，避免重复构建
+#
+# 关键约定（改了会出问题）：
+#   · ./auths 与 ./data 的属主必须是 10001:10001，否则 /healthz 的 total 为 0
+#   · config.json 是【单文件】bind mount，必须原地写入（mv 换 inode 后容器看不到新内容）
+#   · config.json 里的 listen 必须是 ":7863"（监听所有网卡），否则端口映射进不来
+
 services:
   wb2api:
-    build: .
+    build:
+      context: .
+      # 本机默认路由走隧道（fake-ip），容器内无法直达 Go 代理；
+      # 构建阶段用 host 网络，让 go mod download 走宿主可用的通路。
+      network: host
+    image: workbuddy2api:latest
     container_name: workbuddy2api
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+    networks:
+      - wb-net
     ports:
-      - "7863:7863"
+      # 安装脚本会把 127.0.0.1 替换成具体绑定地址：
+      #   127.0.0.1  = 只本机（配合 nginx HTTPS 或管理端容器直连）
+      #   100.x.x.x  = 只绑 Tailscale 网卡（推荐，pi 从外网走内网进来）
+      #   0.0.0.0    = 公网直连（api_key 会明文过网，不推荐）
+      - "127.0.0.1:7863:7863"
     volumes:
-      # auths 凭证卷：login.sh 在宿主机落盘 workbuddy-<uid>.json（0600），容器网关以
-      # app(uid 10001) 读 + 回写（refresh / realm backfill 走 tmp+rename，需目录写权限）。
-      # 跨 uid 部署（非 root 宿主落盘 / rootful 下宿主 uid≠10001）读不到 → 账号数为 0
-      # （issue #108）。登录后把目录属主交给 10001（与 ./data 卷同口径）：
-      #   chown -R 10001:10001 ./auths
-      # 之后新增账号建议进容器登录（app 自身落盘，属主即 10001，免反复 chown；容器内无
-      # docker CLI，完成后回宿主机重启）：
-      #   docker compose exec -it wb2api bash -c './login.sh' && docker compose restart wb2api
       - ./auths:/app/auths
-      # data 保持 bind mount（本地映射，与旧版本一致）。
-      # 若容器内 app(uid 10001) 写 state.json 报 permission denied，宿主机执行：
-      #   chown -R 10001:10001 ./data
       - ./data:/app/data
       - ./config.json:/app/config.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7863/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  wb-net:
+    external: true

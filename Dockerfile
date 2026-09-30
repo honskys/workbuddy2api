@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.26-alpine AS build
 WORKDIR /src
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 COPY go.mod ./
 RUN go mod download
 COPY . .
@@ -14,6 +16,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wb2api ./cmd/serve
 
 FROM alpine:3.20
 # python3：login.sh 的 JSON 解析 / 签到 / 落盘；bash：shell 脚本体。
+# 本地修改：dl-cdn 太慢导致 apk 超时(exit 5)，切到 aliyun 镜像。
+RUN sed -i 's#https\?://dl-cdn.alpinelinux.org#https://mirrors.aliyun.com#g' /etc/apk/repositories
 RUN apk add --no-cache wget ca-certificates tzdata python3 bash \
  && adduser -D -u 10001 app \
  && mkdir -p /app/auths /app/data \
