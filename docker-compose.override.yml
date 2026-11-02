@@ -1,0 +1,24 @@
+# 增量配置（override）
+#
+# 为什么用 override：install-all.sh 每次都会重写 docker-compose.yml，
+# 用 docker-compose.override.yml 可让这些增量在重写后依然生效。
+#
+# 内容：
+#   1) 局域网访问：在保留主 compose 的 127.0.0.1:7863（本机 pi 继续可用）之外，
+#      额外把网关发布到局域网网卡 192.168.0.251:7863，供同网段机器访问。
+#      注意：只绑具体 LAN 网卡，**不用 0.0.0.0**（避免暴露到隧道/docker 网桥等其它接口）。
+#      若本机 LAN IP 变化，改下面的地址后执行：cd /opt/workbuddy2api && docker compose up -d
+#   2) 日志轮转（2026-11-02 新增）：之前容器日志无上限、也没轮转，json 日志文件被
+#      外部截断过一次（2026-10-09 23:00 之后出现一段 NUL 空洞），导致
+#      `docker logs workbuddy2api` 永久只能读到 10/09 之前的内容，巡检日报再也
+#      抓不到 workbuddy 的 `checkin done` 批次行。现在交给 docker 自己按大小轮转。
+
+services:
+  wb2api:
+    ports:
+      - "192.168.0.251:7863:7863"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
